@@ -1,0 +1,9 @@
+# Sensitive config and auth files — never commit these
+~/.config/gsuite-skill/token.json
+~/.config/gsuite-skill/agent_config.json
+~/.config/gsuite-skill/credentials.json
+~/.config/gsuite-skill/seen_emails.json
+~/.config/gsuite-skill/agent.log
+
+# macOS
+.DS_Store

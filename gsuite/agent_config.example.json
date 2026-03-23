@@ -1,0 +1,10 @@
+{
+  "imessage_phone": "4151234567",
+  "anthropic_api_key": "sk-ant-api03-...",
+  "ninth_grade_start_year": 2025,
+  "extracurriculars": ["varsity tennis"],
+  "calendar_attendees": ["family1@gmail.com", "family2@gmail.com"],
+  "school_name": "Your School Name",
+  "school_location": "City, State",
+  "timezone": "America/Los_Angeles"
+}
