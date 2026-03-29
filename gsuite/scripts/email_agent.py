@@ -495,14 +495,20 @@ def create_calendar_event(client, title: str, datetime_str: str, description: st
 
 # ── macOS actions ─────────────────────────────────────────────────────────────
 
-def add_reminder(title: str, notes: str, dry_run: bool) -> bool:
+def add_reminder(title: str, notes: str, dry_run: bool, list_name: str = "") -> bool:
     if dry_run:
-        log(f"  [DRY RUN] Reminder: {title}")
+        list_label = f'"{list_name}"' if list_name else "default list"
+        log(f"  [DRY RUN] Reminder ({list_label}): {title}")
         return True
     safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
     safe_notes = notes.replace("\\", "\\\\").replace('"', '\\"')
+    if list_name:
+        safe_list = list_name.replace("\\", "\\\\").replace('"', '\\"')
+        list_target = f'list "{safe_list}"'
+    else:
+        list_target = "default list"
     script = f'''tell application "Reminders"
-    set newReminder to make new reminder at end of default list
+    set newReminder to make new reminder at end of {list_target}
     set name of newReminder to "{safe_title}"
     set body of newReminder to "{safe_notes}"
 end tell'''
@@ -510,7 +516,7 @@ end tell'''
     if result.returncode != 0:
         log(f"  ERROR adding reminder: {result.stderr.strip()}")
         return False
-    log(f"  Reminder added: {title}")
+    log(f"  Reminder added to {list_target}: {title}")
     return True
 
 
@@ -544,8 +550,10 @@ def main():
     args = parser.parse_args()
 
     config = load_config()
-    phone = config.get("imessage_phone", "")
-    if not phone or phone == "YOUR_PHONE_NUMBER_HERE":
+    phone_raw = config.get("imessage_phone", "")
+    phones = phone_raw if isinstance(phone_raw, list) else [phone_raw]
+    phones = [p for p in phones if p and p != "YOUR_PHONE_NUMBER_HERE"]
+    if not phones:
         log("ERROR: imessage_phone not set in agent_config.json")
         sys.exit(1)
 
@@ -564,6 +572,7 @@ def main():
     school_location = config.get("school_location", "")
     kids = config.get("kids", [])
     team_level = config.get("team_level", "")
+    reminder_list = config.get("reminder_list", "")
 
     try:
         import anthropic
@@ -690,7 +699,7 @@ def main():
                         notifications.append(f"📅 {ev_title} ({ev_dt})")
                 else:
                     notes = f"From: {sender} | {action_desc}"
-                    ok = add_reminder(f"Schedule: {ev_title}", notes, args.dry_run)
+                    ok = add_reminder(f"Schedule: {ev_title}", notes, args.dry_run, reminder_list)
                     if ok:
                         reminders_created.append(ev_title)
                     notifications.append(f"📅 {ev_title} — check date/time")
@@ -698,7 +707,7 @@ def main():
         elif cat == "ACTION":
             title = subject
             notes = f"From: {sender}\n\n{action_desc}" if action_desc else f"From: {sender}"
-            ok = add_reminder(title, notes, args.dry_run)
+            ok = add_reminder(title, notes, args.dry_run, reminder_list)
             if ok:
                 reminders_created.append(title)
             # Include action description in iMessage so it's actionable at a glance
@@ -723,8 +732,9 @@ def main():
             lines.append(f"\nCalendar: " + ", ".join(calendar_created))
         if reminders_created:
             lines.append(f"Reminders: " + ", ".join(reminders_created))
-        send_imessage(phone, "\n".join(lines), args.dry_run)
-        log(f"iMessage sent with {len(notifications)} item(s).")
+        for phone in phones:
+            send_imessage(phone, "\n".join(lines), args.dry_run)
+        log(f"iMessage sent to {len(phones)} recipient(s) with {len(notifications)} item(s).")
     else:
         log("Nothing notable — no iMessage sent.")
 

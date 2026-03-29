@@ -8,5 +8,6 @@
   "calendar_attendees": ["family1@gmail.com", "family2@gmail.com"],
   "school_name": "Your School Name",
   "school_location": "City, State",
-  "timezone": "America/Los_Angeles"
+  "timezone": "America/Los_Angeles",
+  "reminder_list": "Family"
 }

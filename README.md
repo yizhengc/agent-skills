@@ -66,7 +66,8 @@ Edit `~/.config/gsuite-skill/agent_config.json`:
   "calendar_attendees": ["family1@gmail.com", "family2@gmail.com"],
   "school_name": "Your School Name",
   "school_location": "City, State",
-  "timezone": "America/Los_Angeles"
+  "timezone": "America/Los_Angeles",
+  "reminder_list": "Family"
 }
 ```
 
@@ -80,6 +81,7 @@ Edit `~/.config/gsuite-skill/agent_config.json`:
 | `school_name` | School name used in Claude prompts |
 | `school_location` | City/state used in Claude prompts |
 | `timezone` | IANA timezone string, e.g. `America/Los_Angeles` |
+| `reminder_list` | macOS Reminders list name to add items to (e.g. `Family` for a shared iCloud list) |
 
 #### 4. Authenticate with Google
 
