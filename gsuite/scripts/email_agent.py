@@ -510,6 +510,7 @@ end tell'''
     if result.returncode != 0:
         log(f"  ERROR adding reminder: {result.stderr.strip()}")
         return False
+    log(f"  Reminder added: {title}")
     return True
 
 
