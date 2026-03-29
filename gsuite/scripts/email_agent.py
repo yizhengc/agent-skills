@@ -163,7 +163,10 @@ Output a single JSON object (no markdown):
     "financial"           — bill, invoice, bank alert, payment, tax
     "health"              — medical, insurance, pharmacy, lab
     "personal"            — email from a person (classmate parent, friend, etc.)
-    "ignore"              — marketing, LinkedIn, job alerts, ads, automated noise
+    "ignore"              — marketing, LinkedIn, job alerts, ads, automated noise, \
+                            OR Google Calendar invitation/notification emails (subjects starting with \
+                            "Invitation:", "Updated invitation:", "Accepted:", "Declined:", "Canceled:", \
+                            "Forwarded invitation:") — these are already handled by Google Calendar directly
 - "priority": "HIGH" | "MEDIUM" | "LOW" | "IGNORE"
 - "grade_relevant": true if relevant to this family's kids, false only if explicitly for a different grade
 - "reason": one sentence explaining your decision
@@ -545,6 +548,14 @@ def main():
         subject = summary.get("subject", "(no subject)")
         sender = summary.get("from", "unknown")
         log(f"  [{sender[:30]}] {subject[:55]}")
+
+        # Pre-filter: skip Google Calendar invite/notification emails
+        subject = summary.get("subject", "")
+        gcal_prefixes = ("Invitation:", "Updated invitation:", "Accepted:", "Declined:",
+                         "Canceled:", "Forwarded invitation:")
+        if any(subject.startswith(p) for p in gcal_prefixes):
+            log(f"    → skipped (Google Calendar notification)")
+            continue
 
         # Stage 1: cheap classify (no full body needed)
         classification = classify_email(client, summary, now_str, grade_label, extracurriculars,
