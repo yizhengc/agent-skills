@@ -295,6 +295,10 @@ Guidelines by email type:
 
 Output a single JSON object (no markdown):
 - "category": "MEETING_EVENT" | "ACTION" | "FYI" | "IGNORE"
+- "family_relevant": true if this email involves the kids or whole family (school events, sports \
+  schedules, kids' activities, school announcements, anything both parents should know about); \
+  false if the content is personal to the account owner only (e.g. a bill/statement in their name, \
+  a health appointment just for them, personal correspondence only relevant to them)
 - "events": for MEETING_EVENT, an array of ALL distinct events, each with:
     - "title": concise title ≤60 chars, e.g. "Varsity Tennis vs Menlo (Away)"
     - "datetime_str": date and time as written in email, e.g. "Mon March 23 at 3:30 PM" (null if unknown)
@@ -604,9 +608,12 @@ def main():
 
     existing_events = load_existing_events(days=60)
 
-    notifications = []
-    calendar_created = []
-    reminders_created = []
+    family_notifs = []
+    personal_notifs = []
+    family_calendar = []
+    family_reminders = []
+    personal_calendar = []
+    personal_reminders = []
 
     for summary in new_emails:
         subject = summary.get("subject", "(no subject)")
@@ -662,11 +669,18 @@ def main():
         cat = extraction.get("category", "IGNORE")
         action_desc = extraction.get("action_description") or extraction.get("summary") or ""
         is_recurring = extraction.get("is_recurring", False)
+        family_relevant = extraction.get("family_relevant", True)
 
-        log(f"    → [stage2] category={cat} recurring={is_recurring}")
+        log(f"    → [stage2] category={cat} recurring={is_recurring} family={family_relevant}")
 
         if cat == "IGNORE":
             continue
+
+        # Route to the right buckets based on family_relevant
+        notif_bucket = family_notifs if family_relevant else personal_notifs
+        cal_bucket = family_calendar if family_relevant else personal_calendar
+        rem_bucket = family_reminders if family_relevant else personal_reminders
+        item_reminder_list = reminder_list if family_relevant else ""
 
         if cat == "MEETING_EVENT":
             events = extraction.get("events") or []
@@ -695,47 +709,54 @@ def main():
                         attendees=calendar_attendees,
                     )
                     if ok:
-                        calendar_created.append(ev_title)
-                        notifications.append(f"📅 {ev_title} ({ev_dt})")
+                        cal_bucket.append(ev_title)
+                        notif_bucket.append(f"📅 {ev_title} ({ev_dt})")
                 else:
                     notes = f"From: {sender} | {action_desc}"
-                    ok = add_reminder(f"Schedule: {ev_title}", notes, args.dry_run, reminder_list)
+                    ok = add_reminder(f"Schedule: {ev_title}", notes, args.dry_run, item_reminder_list)
                     if ok:
-                        reminders_created.append(ev_title)
-                    notifications.append(f"📅 {ev_title} — check date/time")
+                        rem_bucket.append(ev_title)
+                    notif_bucket.append(f"📅 {ev_title} — check date/time")
 
         elif cat == "ACTION":
             title = subject
             notes = f"From: {sender}\n\n{action_desc}" if action_desc else f"From: {sender}"
-            ok = add_reminder(title, notes, args.dry_run, reminder_list)
+            ok = add_reminder(title, notes, args.dry_run, item_reminder_list)
             if ok:
-                reminders_created.append(title)
+                rem_bucket.append(title)
             # Include action description in iMessage so it's actionable at a glance
             notif = f"✅ {title}"
             if action_desc:
                 notif += f"\n   {action_desc}"
-            notifications.append(notif)
+            notif_bucket.append(notif)
 
         elif cat == "FYI" and priority == "HIGH":
             school_domains = ("nuevaschool.org", "instructure.com", "myschoolapp.com",
                               "myschoolemails.com", "parentsquare.com")
             is_school = any(d in sender for d in school_domains) or "nueva" in subject.lower()
             if not is_recurring or is_school:
-                notifications.append(f"ℹ️ {subject}")
+                notif_bucket.append(f"ℹ️ {subject}")
 
     save_seen(seen)
 
-    if notifications:
-        now_str_short = datetime.now(LA_TZ).strftime("%b %d, %I:%M %p")
-        lines = [f"📬 Email digest ({now_str_short}):"] + notifications
-        if calendar_created:
-            lines.append(f"\nCalendar: " + ", ".join(calendar_created))
-        if reminders_created:
-            lines.append(f"Reminders: " + ", ".join(reminders_created))
-        for phone in phones:
+    now_str_short = datetime.now(LA_TZ).strftime("%b %d, %I:%M %p")
+
+    def _send_digest(notifs, cal_list, rem_list, phones_to_use, label):
+        if not notifs:
+            return
+        lines = [f"📬 Email digest ({now_str_short}):"] + notifs
+        if cal_list:
+            lines.append("\nCalendar: " + ", ".join(cal_list))
+        if rem_list:
+            lines.append("Reminders: " + ", ".join(rem_list))
+        for phone in phones_to_use:
             send_imessage(phone, "\n".join(lines), args.dry_run)
-        log(f"iMessage sent to {len(phones)} recipient(s) with {len(notifications)} item(s).")
-    else:
+        log(f"iMessage sent to {len(phones_to_use)} recipient(s) [{label}] with {len(notifs)} item(s).")
+
+    _send_digest(family_notifs, family_calendar, family_reminders, phones, "family")
+    _send_digest(personal_notifs, personal_calendar, personal_reminders, phones[:1], "personal")
+
+    if not family_notifs and not personal_notifs:
         log("Nothing notable — no iMessage sent.")
 
     log("Done.")
