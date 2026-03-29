@@ -696,11 +696,15 @@ def main():
 
         elif cat == "ACTION":
             title = subject
-            notes = f"From: {sender} | {action_desc}"
+            notes = f"From: {sender}\n\n{action_desc}" if action_desc else f"From: {sender}"
             ok = add_reminder(title, notes, args.dry_run)
             if ok:
                 reminders_created.append(title)
-            notifications.append(f"✅ {title}")
+            # Include action description in iMessage so it's actionable at a glance
+            notif = f"✅ {title}"
+            if action_desc:
+                notif += f"\n   {action_desc}"
+            notifications.append(notif)
 
         elif cat == "FYI" and priority == "HIGH":
             school_domains = ("nuevaschool.org", "instructure.com", "myschoolapp.com",
