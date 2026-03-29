@@ -24,10 +24,13 @@ Config: ~/.config/gsuite-skill/agent_config.json
   - extracurriculars: list of activities (e.g. ["varsity tennis"])
 """
 import argparse
+import html as html_module
 import json
 import os
+import re
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -104,6 +107,38 @@ def log(msg: str):
         pass
 
 
+# ── URL content fetching ──────────────────────────────────────────────────────
+
+# URL patterns to skip (unsubscribe, tracking, social, maps)
+_SKIP_URL_PATTERNS = re.compile(
+    r'unsubscribe|track|facebook|twitter|instagram|linkedin|youtube|google\.com/maps',
+    re.IGNORECASE
+)
+
+
+def extract_primary_url(body: str) -> Optional[str]:
+    """Return the first non-tracking URL found in an email body, or None."""
+    for url in re.findall(r'https?://[^\s\)\"\'\]]+', body):
+        if not _SKIP_URL_PATTERNS.search(url):
+            return url.rstrip('.,;')
+    return None
+
+
+def fetch_url_text(url: str, max_chars: int = 4000) -> Optional[str]:
+    """Fetch a URL and return clean plain text (HTML stripped, entities decoded)."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        text = re.sub(r'<[^>]+>', ' ', raw)
+        text = html_module.unescape(text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:max_chars]
+    except Exception as e:
+        log(f"  WARNING: Could not fetch URL content: {e}")
+        return None
+
+
 # ── Email fetching ─────────────────────────────────────────────────────────────
 
 def fetch_email_list(hours: int, max_emails: int, query: str = "") -> List[Dict]:
@@ -151,6 +186,8 @@ Context:
 - Today: {now}
 
 Classify this email using only the headers and snippet below.
+Note: some school emails (e.g. from myschoolapp.com, myschoolemails.com, ParentSquare) may have
+an empty From field — rely on the subject and snippet to classify those.
 
 From: {sender}
 Subject: {subject}
@@ -248,7 +285,10 @@ Guidelines by email type:
   If no start time is specified for a game/practice/match, assume 3:00 PM (school ends at 3pm, \
   activities start right after). Include "3:00 PM" in datetime_str in that case.
 - "school_event": extract all specific events, deadlines, sign-ups.
-- "school_announcement": extract any specific events or actions mentioned, even in a newsletter.
+- "school_announcement": this is a newsletter that often contains MULTIPLE embedded events and deadlines.
+  Scan the entire body carefully. Extract EVERY item that has a specific date or deadline as a separate
+  event. Extract items requiring parent/student action (RSVP, sign up, course selection, donate by X)
+  as actions. Do NOT return FYI if there are any dated events or action items — use MEETING_EVENT or ACTION.
 - "action_required": identify what needs to be done, by whom, and by when.
 - "financial" / "health": note any required actions or important dates.
 - "personal": extract any proposed meeting/event or action item.
@@ -590,7 +630,19 @@ def main():
 
         # Stage 2: fetch full body, extract structured data
         full = fetch_full_email(summary["id"])
-        email_for_extract = full if full else summary
+        email_for_extract = dict(full) if full else dict(summary)
+
+        # If body is short (link-only emails like myschoolapp.com newsletters),
+        # fetch the linked page and use that as the body
+        body = email_for_extract.get("body") or ""
+        if len(body) < 1200:
+            url = extract_primary_url(body)
+            if url:
+                log(f"  Fetching linked content: {url[:80]}...")
+                linked_text = fetch_url_text(url)
+                if linked_text:
+                    email_for_extract["body"] = linked_text
+                    log(f"  Fetched {len(linked_text)} chars from linked page")
 
         extraction = extract_email(client, email_for_extract, email_type, now_str, grade_label,
                                    extracurriculars, school_name, school_location, kids, team_level)
@@ -651,7 +703,9 @@ def main():
             notifications.append(f"✅ {title}")
 
         elif cat == "FYI" and priority == "HIGH":
-            is_school = "nuevaschool.org" in sender or "instructure.com" in sender
+            school_domains = ("nuevaschool.org", "instructure.com", "myschoolapp.com",
+                              "myschoolemails.com", "parentsquare.com")
+            is_school = any(d in sender for d in school_domains) or "nueva" in subject.lower()
             if not is_recurring or is_school:
                 notifications.append(f"ℹ️ {subject}")
 
