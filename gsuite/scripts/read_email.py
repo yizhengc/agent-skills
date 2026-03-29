@@ -89,14 +89,14 @@ def list_emails(service, max_results: int = 10, query: str = "") -> None:
             metadataHeaders=["From", "Subject", "Date"]
         ).execute()
 
-        headers = {h["name"]: h["value"] for h in full.get("payload", {}).get("headers", [])}
+        headers = {h["name"].lower(): h["value"] for h in full.get("payload", {}).get("headers", [])}
         snippet = full.get("snippet", "")
 
         output.append({
             "id": msg["id"],
-            "from": decode_mime_header(headers.get("From", "")),
-            "subject": decode_mime_header(headers.get("Subject", "(no subject)")),
-            "date": headers.get("Date", ""),
+            "from": decode_mime_header(headers.get("from", "")),
+            "subject": decode_mime_header(headers.get("subject", "(no subject)")),
+            "date": headers.get("date", ""),
             "snippet": snippet[:200],
         })
 
@@ -108,15 +108,15 @@ def read_email(service, msg_id: str) -> None:
         userId="me", id=msg_id, format="full"
     ).execute()
 
-    headers = {h["name"]: h["value"] for h in full.get("payload", {}).get("headers", [])}
+    headers = {h["name"].lower(): h["value"] for h in full.get("payload", {}).get("headers", [])}
     body = get_message_body(full.get("payload", {}))
 
     output = {
         "id": msg_id,
-        "from": decode_mime_header(headers.get("From", "")),
-        "to": decode_mime_header(headers.get("To", "")),
-        "subject": decode_mime_header(headers.get("Subject", "(no subject)")),
-        "date": headers.get("Date", ""),
+        "from": decode_mime_header(headers.get("from", "")),
+        "to": decode_mime_header(headers.get("to", "")),
+        "subject": decode_mime_header(headers.get("subject", "(no subject)")),
+        "date": headers.get("date", ""),
         "body": body.strip()[:5000],  # Cap at 5000 chars
         "body_truncated": len(body) > 5000,
     }
