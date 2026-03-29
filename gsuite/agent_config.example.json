@@ -3,6 +3,8 @@
   "anthropic_api_key": "sk-ant-api03-...",
   "ninth_grade_start_year": 2025,
   "extracurriculars": ["varsity tennis"],
+  "kids": ["Child1", "Child2"],
+  "team_level": "VA",
   "calendar_attendees": ["family1@gmail.com", "family2@gmail.com"],
   "school_name": "Your School Name",
   "school_location": "City, State",

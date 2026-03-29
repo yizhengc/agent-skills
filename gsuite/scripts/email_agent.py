@@ -145,7 +145,9 @@ You are a quick email classifier for a parent of high school students.
 
 Context:
 - Kids are in {grade_label} at {school_name} ({school_location})
+- Kids' names: {kids}
 - Extracurriculars: {extracurriculars}
+- Kids' team level: {team_level} (e.g. VA = Varsity)
 - Today: {now}
 
 Classify this email using only the headers and snippet below.
@@ -156,9 +158,11 @@ Snippet: {snippet}
 
 Output a single JSON object (no markdown):
 - "email_type": one of:
-    "sports_schedule"     — game/match/practice schedule from a sports program
+    "sports_schedule"     — any email from a coach or sports program, including weekly recaps/updates
+                            (these often contain upcoming schedules — ALWAYS use this type for coach emails,
+                            never classify them as "school_announcement")
     "school_event"        — specific event, deadline, or meeting from school/canvas
-    "school_announcement" — general school newsletter or informational update
+    "school_announcement" — general school newsletter or informational update (NOT from a coach)
     "action_required"     — something the parent must do (sign, pay, RSVP, etc.)
     "financial"           — bill, invoice, bank alert, payment, tax
     "health"              — medical, insurance, pharmacy, lab
@@ -192,14 +196,17 @@ def _parse_json_response(text: str) -> Optional[Dict]:
 
 def classify_email(client, summary: Dict, now_str: str, grade_label: str,
                    extracurriculars: List[str], school_name: str,
-                   school_location: str) -> Optional[Dict]:
+                   school_location: str, kids: List[str],
+                   team_level: str) -> Optional[Dict]:
     """Stage 1: cheap Haiku classifier. Returns {email_type, priority, grade_relevant, reason}."""
     extras = ", ".join(extracurriculars) if extracurriculars else "none listed"
     prompt = CLASSIFY_PROMPT.format(
         grade_label=grade_label,
         school_name=school_name,
         school_location=school_location,
+        kids=", ".join(kids) if kids else "not specified",
         extracurriculars=extras,
+        team_level=team_level or "not specified",
         now=now_str,
         sender=summary.get("from", "unknown"),
         subject=summary.get("subject", "(no subject)"),
@@ -227,7 +234,9 @@ You are a personal assistant extracting structured information from an email.
 
 Context about the family:
 - Kids are in {grade_label} at {school_name} ({school_location})
+- Kids' names: {kids}
 - Extracurriculars: {extracurriculars}
+- Kids' team level: {team_level} — only extract events for this level; skip events for other levels (e.g. if team_level is "VA", ignore all JV events)
 - Email type: {email_type}
 - Today: {now}
 
@@ -267,14 +276,17 @@ Body:
 
 def extract_email(client, full_email: Dict, email_type: str, now_str: str,
                   grade_label: str, extracurriculars: List[str],
-                  school_name: str, school_location: str) -> Optional[Dict]:
+                  school_name: str, school_location: str,
+                  kids: List[str], team_level: str) -> Optional[Dict]:
     """Stage 2: Sonnet extractor. Returns {category, events, action_description, is_recurring, summary}."""
     extras = ", ".join(extracurriculars) if extracurriculars else "none listed"
     prompt = EXTRACT_PROMPT.format(
         grade_label=grade_label,
         school_name=school_name,
         school_location=school_location,
+        kids=", ".join(kids) if kids else "not specified",
         extracurriculars=extras,
+        team_level=team_level or "not specified",
         email_type=email_type,
         now=now_str,
         sender=full_email.get("from", "unknown"),
@@ -509,6 +521,8 @@ def main():
     calendar_attendees = config.get("calendar_attendees", [])
     school_name = config.get("school_name", "their school")
     school_location = config.get("school_location", "")
+    kids = config.get("kids", [])
+    team_level = config.get("team_level", "")
 
     try:
         import anthropic
@@ -559,7 +573,7 @@ def main():
 
         # Stage 1: cheap classify (no full body needed)
         classification = classify_email(client, summary, now_str, grade_label, extracurriculars,
-                                        school_name, school_location)
+                                        school_name, school_location, kids, team_level)
         mark_seen(seen, summary["id"])
 
         if not classification:
@@ -579,7 +593,7 @@ def main():
         email_for_extract = full if full else summary
 
         extraction = extract_email(client, email_for_extract, email_type, now_str, grade_label,
-                                   extracurriculars, school_name, school_location)
+                                   extracurriculars, school_name, school_location, kids, team_level)
         if not extraction:
             continue
 
