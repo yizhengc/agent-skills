@@ -31,7 +31,7 @@ import re
 import subprocess
 import sys
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -306,6 +306,8 @@ Output a single JSON object (no markdown):
     - "duration_minutes": estimated duration in minutes (default 60 for games, 30 for practices)
   If not MEETING_EVENT, set to [].
 - "action_description": what the parent needs to do or know (2–3 sentences), or null
+- "due_date": for ACTION items, the due date/deadline as written in the email (e.g. "Fri Apr 3", \
+  "April 3rd", "by end of week") — null if no deadline mentioned or not ACTION category
 - "is_recurring": true if this is a regularly scheduled digest/newsletter, false otherwise
 - "summary": 1–2 sentence summary of the email's key content
 
@@ -499,10 +501,11 @@ def create_calendar_event(client, title: str, datetime_str: str, description: st
 
 # ── macOS actions ─────────────────────────────────────────────────────────────
 
-def add_reminder(title: str, notes: str, dry_run: bool, list_name: str = "") -> bool:
+def add_reminder(title: str, notes: str, dry_run: bool, list_name: str = "", due_date_iso: str = "") -> bool:
     if dry_run:
         list_label = f'"{list_name}"' if list_name else "default list"
-        log(f"  [DRY RUN] Reminder ({list_label}): {title}")
+        due_label = f" due {due_date_iso[:10]}" if due_date_iso else ""
+        log(f"  [DRY RUN] Reminder ({list_label}){due_label}: {title}")
         return True
     safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
     safe_notes = notes.replace("\\", "\\\\").replace('"', '\\"')
@@ -511,16 +514,28 @@ def add_reminder(title: str, notes: str, dry_run: bool, list_name: str = "") -> 
         list_target = f'list "{safe_list}"'
     else:
         list_target = "default list"
+
+    due_line = ""
+    if due_date_iso:
+        try:
+            dt = datetime.fromisoformat(due_date_iso)
+            # AppleScript date format: "April 3, 2026 9:00:00 AM"
+            as_date = dt.strftime("%B %-d, %Y %I:%M:%S %p")
+            due_line = f'\n    set due date of newReminder to date "{as_date}"'
+        except Exception:
+            pass
+
     script = f'''tell application "Reminders"
     set newReminder to make new reminder at end of {list_target}
     set name of newReminder to "{safe_title}"
-    set body of newReminder to "{safe_notes}"
+    set body of newReminder to "{safe_notes}"{due_line}
 end tell'''
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if result.returncode != 0:
         log(f"  ERROR adding reminder: {result.stderr.strip()}")
         return False
-    log(f"  Reminder added to {list_target}: {title}")
+    due_info = f" (due {due_date_iso[:10]})" if due_date_iso else ""
+    log(f"  Reminder added to {list_target}{due_info}: {title}")
     return True
 
 
@@ -713,7 +728,11 @@ def main():
                         notif_bucket.append(f"📅 {ev_title} ({ev_dt})")
                 else:
                     notes = f"From: {sender} | {action_desc}"
-                    ok = add_reminder(f"Schedule: {ev_title}", notes, args.dry_run, item_reminder_list)
+                    # Default due: tomorrow 9am so the reminder fires promptly
+                    tomorrow_9am = (datetime.now(LA_TZ) + timedelta(days=1)).replace(
+                        hour=9, minute=0, second=0, microsecond=0)
+                    due_iso = tomorrow_9am.isoformat()
+                    ok = add_reminder(f"Schedule: {ev_title}", notes, args.dry_run, item_reminder_list, due_iso)
                     if ok:
                         rem_bucket.append(ev_title)
                     notif_bucket.append(f"📅 {ev_title} — check date/time")
@@ -721,7 +740,14 @@ def main():
         elif cat == "ACTION":
             title = subject
             notes = f"From: {sender}\n\n{action_desc}" if action_desc else f"From: {sender}"
-            ok = add_reminder(title, notes, args.dry_run, item_reminder_list)
+            # Parse due date from extraction if present, otherwise default to tomorrow 9am
+            due_date_str = extraction.get("due_date")
+            if due_date_str:
+                due_iso = parse_datetime_iso(client, due_date_str, now_str, default_time="09:00") or ""
+            else:
+                due_iso = (datetime.now(LA_TZ) + timedelta(days=1)).replace(
+                    hour=9, minute=0, second=0, microsecond=0).isoformat()
+            ok = add_reminder(title, notes, args.dry_run, item_reminder_list, due_iso)
             if ok:
                 rem_bucket.append(title)
             # Include action description in iMessage so it's actionable at a glance
